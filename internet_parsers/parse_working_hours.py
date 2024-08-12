@@ -50,6 +50,5 @@ def get_working_hours():
         res+='\n'
     return res
 
-
 if __name__ == "__main__":
     print(get_working_hours())

@@ -1,6 +1,3 @@
-#b1gtb6pp3dt7m6aaqauq
-#AQVNwhlilAZ_2VZRsC8MvqKLQfs9X5UrEUNinyRv
-
 import requests
 import json
 import os
@@ -20,7 +17,6 @@ def gpt(auth_headers):
                 {resp.status_code}, {resp.text}
             )
         )
-
     return resp
 
 if __name__ == "__main__":
