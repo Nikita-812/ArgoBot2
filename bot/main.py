@@ -15,7 +15,7 @@ from aiogram.filters import CommandStart
 from os import getenv, environ
 from internet_parsers.parse_working_hours import get_working_hours
 from internet_parsers.delivery_parse import get_sale_point_from_csv
-from internet_parsers.delivery_parse import towns
+from internet_parsers.towns import towns
 
 TOKEN = getenv("BOT_TOKEN")
 dp = Dispatcher()
@@ -133,8 +133,6 @@ async def ans_handler(message: Message) -> None:
 async def main():
     logging.basicConfig(level=logging.INFO)
     bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-
-    # And the run events dispatching
     await dp.start_polling(bot)
 
 

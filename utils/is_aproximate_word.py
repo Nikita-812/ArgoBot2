@@ -1,10 +1,10 @@
 import csv
 import difflib
-from internet_parsers.delivery_parse import towns
+from internet_parsers.towns import towns
 
 
 def is_word_approx_in_string(word: str, cutoff: float = 0.7) -> str:
-    with open(r"C:\Users\nikita\PycharmProjects\ArgoBot\utils\clean_name_links.csv", encoding="utf-8") as f:
+    with open("C:\\Users\\nikita\\PycharmProjects\\ArgoBot\\utils\\clean_name_links.csv", encoding="utf-8") as f:
         reader = csv.reader(f, delimiter=',')
 
         for row in reader:
@@ -24,6 +24,6 @@ def is_word_approx_in_string(word: str, cutoff: float = 0.7) -> str:
 
 
 if __name__ == '__main__':
-    query = 'Москва'
+    query = 'эсобел'
     result = is_word_approx_in_string(query)
     print(result)
