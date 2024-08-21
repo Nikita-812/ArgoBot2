@@ -23,7 +23,18 @@ def is_word_approx_in_string(word: str, cutoff: float = 0.7) -> str:
     return ''
 
 
+def is_town_approx_in_string(word: str, cutoff: float = 0.8) -> str:
+    words_in_string = word.lower().split()
+    for town in towns:
+        for string_word in words_in_string:
+            if string_word not in towns:
+                close_matches = difflib.get_close_matches(string_word, [town], n=1, cutoff=cutoff)
+                if close_matches:
+                    return town
+    return False
+
+
 if __name__ == '__main__':
-    query = 'эсобел'
-    result = is_word_approx_in_string(query)
+    query = 'В новосибирске'
+    result = is_town_approx_in_string(query)
     print(result)
