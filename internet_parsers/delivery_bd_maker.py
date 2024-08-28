@@ -1,9 +1,10 @@
 import csv
 
-from delivery_parse import get_sale_points, towns
+from delivery_parse import get_sale_points
+from towns import towns
 
 # Открываем файл для записи
-with open('sale_points.csv', 'a', newline='', encoding='utf-8') as f:
+with open('sale_points.csv', 'w', newline='', encoding='utf-8') as f:
     # Создаем объект writer с разделителем ','
     writer = csv.writer(f, delimiter=',')
 

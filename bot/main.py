@@ -1,236 +1,272 @@
 import asyncio
 import logging
+import os
 import sys
+from os import getenv, environ
 
-import requests
-from dateutil import parser
-from email_validation import email_validation_filter
-from bot.States import RegStates
-from utils.is_aproximate_word import is_word_approx_in_string, is_town_approx_in_string
-from gpt.request_maker import request_maker
-from gpt.yandexgpt import gpt
-from aiogram import Bot, Dispatcher, html
-from aiogram import F
-from aiogram.types import Message, KeyboardButton, ReplyKeyboardMarkup
-from aiogram.fsm.context import FSMContext
+from aiogram import Bot, Dispatcher, F, html
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import CommandStart
-from os import getenv, environ
-from internet_parsers.parse_working_hours import get_working_hours
+from aiogram.fsm.context import FSMContext
+from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup, FSInputFile
+from dateutil import parser
+
+from ButtonText import ButtonText
+from bd import bd_reg_participant, bd_get_user_by_id, bd_get_user_by_tg_id
+from bot.States import RegStates, TownsStates, FilesStates
+from gpt.yandexgpt import gpt
 from internet_parsers.delivery_parse import get_sale_point_from_csv
-from requests_to_lk.work_with_api import create_participant_data, post_new_participant
-from aiogram.utils import markdown
-from internet_parsers.towns import towns
+from internet_parsers.parse_working_hours import get_working_hours_from_file
+from requests_to_lk.work_with_api import (
+    api_get_user_by_id, api_get_user_score, api_get_user_tree_score
+)
+from sending_email_messages import generate_password, send_email_password
+from utils.is_aproximate_word import is_word_approx_in_string, is_town_approx_in_string
+from validation import id_validation_filter
 
 TOKEN = getenv("BOT_TOKEN")
 dp = Dispatcher()
-
-
-class ButtonText:
-    info = 'Справочная информация'
-    where = 'Где купить?'
-    times = "Время работы"
-    contact = "Контакты"
-    delivery = "Доставка"
-    delivery_ans = """Бесплатно осуществляется доставка Почтой России и службой доставки СДЭК при выполнении следующих условий:
-Бесплатная доставка по г. Москва и г. Новосибирск при сумме заказа от 1 500 рублей.
-Бесплатная доставка в пределах Московской и Новосибирской области при сумме заказа от 2 000 рублей.
-Бесплатная доставка по территории РФ при сумме заказа от 3 000 рублей"""
-    get_contact = """При обращении к оператору интернет-магазина будьте готовы сообщить номер заказа
-8-800-700-5643 доб.: 
-(1) - оператор интернет-магазина (Москва) пн. - пт. с 9:00 до 17 по Мск.,
-(2) - оператор интернет-магазина (Новосибирск) пн. – пт. с 10:00 до 17:00, сб. с 10:00 до 15:00 по Нск.,
-(3) - проблемы с оплатами пн. – пт. с 5:00 до 14:00 по Мск.,
-(8) - техподдержка и прочие вопросы пн. – пт. с 8:00 до 21:00 по Мск.
-+7 (965) 824 56 76  - Московский центр
-+7 (965) 820 24 86  - Новосибирский центр"""
-    reg = "Зарегистрироваться"
+bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 
 
 def parse_birthdate(date_str: str) -> str:
     try:
-        # Используем dateutil.parser для распознавания даты
         parsed_date = parser.parse(date_str, dayfirst=True)
         return parsed_date.strftime("%Y-%m-%d")
     except (ValueError, TypeError):
-        # Возвращаем сообщение об ошибке, если строку невозможно распознать как дату
         return False
 
 
-def ans_gpt():
-    api_key = environ['API_KEY']
-    headers = {
-        'Authorization': 'Api-Key {}'.format(api_key),
-    }
-    res = gpt(headers).json()
-    res = res['result']
-    res = res['alternatives']
-    res = res[0]
-    return res['message']["text"]
+def get_gpt_response():
+    api_key = environ.get('API_KEY')
+    headers = {'Authorization': f'Api-Key {api_key}'}
+    try:
+        response = gpt(headers).json()
+        alternatives = response['result']['alternatives']
+        return alternatives[0]['message']["text"]
+    except Exception as e:
+        logging.error(f"Ошибка при запросе к GPT: {e}")
+        return "Произошла ошибка при обработке запроса."
 
 
-@dp.message(F.text == ButtonText.delivery)
-async def get_delivary_message(message: Message):
-    await message.answer(text=ButtonText.delivery_ans)
+def create_start_keyboard():
+    buttons = [
+        [KeyboardButton(text=ButtonText.delivery), KeyboardButton(text=ButtonText.times)],
+        [KeyboardButton(text=ButtonText.contact), KeyboardButton(text=ButtonText.where)],
+        [KeyboardButton(text=ButtonText.enter_account)]
+    ]
+    return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
 
-@dp.message(F.text == ButtonText.contact)
-async def get_on_contact_message(message: Message):
-    await message.answer(text=ButtonText.get_contact)
-
-
-def get_on_cons_info():
-    btn1 = KeyboardButton(text=ButtonText.delivery)
-    btn2 = KeyboardButton(text=ButtonText.times)
-    btn3 = KeyboardButton(text=ButtonText.contact)
-    markup = ReplyKeyboardMarkup(resize_keyboard=True, keyboard=[[btn1], [btn2], [btn3]])
-    return markup
-
-
-def get_on_start_kb():
-    btn1 = KeyboardButton(text=ButtonText.delivery)
-    btn2 = KeyboardButton(text=ButtonText.times)
-    btn3 = KeyboardButton(text=ButtonText.contact)
-    btn4 = KeyboardButton(text=ButtonText.where)
-    btn5 = KeyboardButton(text=ButtonText.reg)
-    markup = ReplyKeyboardMarkup(
-        keyboard=[
-            [btn1, btn2],  # Первая строка с двумя кнопками
-            [btn3, btn4],  # Вторая строка с двумя кнопками
-            [btn5]  # Третья строка с одной кнопкой
-        ],
-        resize_keyboard=True  # Клавиатура адаптируется под размер экрана
-    )
-    return markup
-
-
-@dp.message(F.text == ButtonText.reg)
-async def get_on_reg_message(message: Message, state: FSMContext):
-    await state.set_state(RegStates.full_name)
-    await message.answer(text="Как вас зовут?")
-
-
-@dp.message(RegStates.full_name, F.text)
-async def get_full_name(message: Message, state: FSMContext):
-    await state.update_data(full_name=message.text)
-    await message.answer(f"{markdown.hbold(message.text)}, введите ваш адрес электронной почты")
-    await state.set_state(RegStates.email)
-
-
-@dp.message(RegStates.email, email_validation_filter)
-async def get_email_address(message: Message, state: FSMContext, email: str):
-    # Обновляем данные состояния, сохраняя email
-    await state.update_data(email=email)
-    await state.set_state(RegStates.phone_number)
-    contact_button = KeyboardButton(text="Поделиться номером телефона", request_contact=True)
-    contact_keyboard = ReplyKeyboardMarkup(keyboard=[[contact_button]], resize_keyboard=True, one_time_keyboard=True)
-
-    await message.answer("Введите свой номер телефона", reply_markup=contact_keyboard)
-
-
-@dp.message(RegStates.phone_number)
-async def process_contact(message: Message, state: FSMContext):
-    if message.contact:
-        contact = message.contact
-        phone_number = contact.phone_number
-        await state.update_data(phone_number=phone_number)
-        await message.answer(f"Спасибо! Мы получили ваш номер: {phone_number}. Введите дату рождения.")
-        await state.set_state(RegStates.birthday)
-    else:
-        await message.answer("Пожалуйста, используйте кнопку, чтобы поделиться номером телефона.")
-
-
-@dp.message(RegStates.birthday)
-async def get_birthday(message: Message, state: FSMContext):
-    birthday = parse_birthdate(message.text)
-    if birthday:
-        data = await state.update_data(birthday=birthday)
-        try:
-            status_code, json_response = post_new_participant(
-                create_participant_data(name=data["full_name"], email=data['email'],
-                                        mobile_phone=data['phone_number'], birth_date=data['birthday']))
-            if status_code != 200:
-                print(json_response)
-                await message.answer('Что-то пошло не так!', reply_markup=get_on_start_kb())
-            else:
-                await message.answer('Вы успешно зарегестрированы!', reply_markup=get_on_start_kb())
-        except requests.exceptions.ConnectTimeout:
-            await message.answer('Что-то пошло не так!', reply_markup=get_on_start_kb())
-        finally:
-            await state.clear()
-    else:
-        await message.answer('Неверный формат даты')
-
-
-@dp.message(RegStates.email)
-async def invalid_email_address(message: Message):
-    await message.answer("Неверный email")
-
-
-@dp.message(RegStates.full_name, F.text)
-async def get_full_name_invalid_content(message: Message):
-    await message.answer("Отправьте ваше имя текстом")
-
-
-@dp.message(F.text == ButtonText.times)
-async def get_on_contact_message(message: Message):
-    await message.answer(text=get_working_hours())
+def create_background_info_keyboard():
+    buttons = [
+        [KeyboardButton(text=ButtonText.delivery), KeyboardButton(text=ButtonText.times)],
+        [KeyboardButton(text=ButtonText.contact), KeyboardButton(text=ButtonText.where)],
+        [KeyboardButton(text=ButtonText.get_start)]
+    ]
+    return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
 
 @dp.message(F.text == ButtonText.where)
-async def get_on_contact_message(message: Message, state: FSMContext):
-    await message.answer(text="В каком городе?")
-    await state.set_state(RegStates.town)
+async def handle_where_to_buy(message: Message, state: FSMContext):
+    await message.answer("Пожалуйста, укажите город.")
+    await state.set_state(TownsStates.town)
 
 
-@dp.message(RegStates.town, F.text)
-async def reply_sail_points(message: Message, state: FSMContext):
+@dp.message(TownsStates.town, F.text)
+async def handle_town_selection(message: Message, state: FSMContext):
     city_name = is_town_approx_in_string(message.text.lower().strip())
     if city_name:
         sale_points = get_sale_point_from_csv(city_name)
         await state.clear()
+        if isinstance(sale_points, list):
+            result_message = f"Торговые точки в городе {city_name}:\n"
+            for point in sale_points:
+                result_message += (
+                    f"Город: {point['City']}\n"
+                    f"Адрес: {point['Address']}\n"
+                    f"Оплата: {point['Payment Methods']}\n"
+                    f"Телефон: {point['Phone']}\n"
+                    f"E-Mail: {point['Email']}\n\n"
+                )
+        else:
+            result_message = sale_points
+        await message.answer(text=result_message, reply_markup=create_familiar_user_keyboard())
     else:
-        await message.answer('Неверное название города')
+        await message.answer('Извините, но название города не распознано. Пожалуйста, попробуйте снова.')
 
-    # Преобразование списка точек продаж в строку
-    if isinstance(sale_points, list):
-        result_message = f"Торговые точки в городе {city_name}:\n"
-        for point in sale_points:
-            result_message += f"Город: {point['City']}\n"
-            result_message += f"Адрес: {point['Address']}\n"
-            result_message += f"Оплата: {point['Payment Methods']}\n"
-            result_message += f"Телефон: {point['Phone']}\n"
-            result_message += f"E-Mail: {point['Email']}\n"
-            result_message += "\n"
+
+@dp.message(TownsStates.town)
+async def failure_town_selection(message: Message):
+    await message.answer('Пожалуйста, введите название города текстом')
+
+
+@dp.message(F.text == ButtonText.delivery)
+async def handle_delivery_request(message: Message):
+    await message.answer(text=ButtonText.delivery_ans)
+
+
+@dp.message(F.text == ButtonText.contact)
+async def handle_contact_request(message: Message):
+    await message.answer(text=ButtonText.get_contact)
+
+
+@dp.message(F.text == ButtonText.times)
+async def handle_working_hours_request(message: Message):
+    try:
+        content = await get_working_hours_from_file()
+        await message.answer(text=content)
+    except Exception as e:
+        await message.answer(f"Произошла ошибка при получении рабочего времени: {str(e)}")
+
+
+@dp.message(F.text == ButtonText.reg)
+async def handle_registration_start(message: Message, state: FSMContext):
+    await state.set_state(RegStates.name)
+    await message.answer(text="Как вас зовут?")
+
+
+@dp.message(F.text == ButtonText.enter_account)
+async def handle_enter_account(message: Message, state: FSMContext):
+    await state.set_state(RegStates.id)
+    await message.answer('Пожалуйста, введите ваш ID')
+
+
+@dp.message(RegStates.id, F.text)
+async def handle_user_search(message: Message, state: FSMContext):
+    user_id = id_validation_filter(message.text)
+    status, user = await api_get_user_by_id(user_id)
+    if status:
+        password = generate_password()
+        send_email_password(user['email'], password)
+        await message.answer("Пароль отправлен на вашу почту. Пожалуйста, введите его.")
+        await state.update_data(id=user)
+        await state.set_state(RegStates.password)
+        await state.update_data(password=password)
     else:
-        result_message = sale_points
+        await message.answer('Не удалось подключиться к серверу, попробуйте позже.')
 
-    await message.answer(text=result_message)
+
+@dp.message(RegStates.id)
+async def failure_get_user_id(message: Message):
+    await message.answer('Пожалуйста, введите ваш id текстом')
+
+
+@dp.message(RegStates.password, F.text)
+async def handle_password_check(message: Message, state: FSMContext):
+    try:
+        password = message.text
+        user_data = await state.get_data()
+        if password == user_data['password']:
+            user_data['id']['api_id'] = message.from_user.id
+            await bd_reg_participant(user_data['id'])
+            await message.answer("Пароль верен. Вы успешно вошли в аккаунт.",
+                                 reply_markup=create_familiar_user_keyboard())
+            await state.clear()
+        else:
+            await message.answer("Неверный пароль. Попробуйте еще раз.")
+    except Exception as e:
+        logging.error(f"Ошибка при проверке пароля: {e}")
+        await message.answer('Произошла ошибка. Попробуйте войти позже.')
+
+
+@dp.message(RegStates.password)
+async def failure_password_check(message: Message):
+    await message.answer('Введите ваш пароль текстом')
+
+
+@dp.message(F.text == ButtonText.get_bonus_score)
+async def handle_bonus_score_request(message: Message):
+    api_id = await bd_get_user_by_tg_id(message.from_user.id)
+    status, user_info = await api_get_user_score(api_id)
+    if status == 200:
+        personal_pv = user_info['personalPv']
+        await message.answer(f'Ваш персональный PV: {personal_pv}')
+    else:
+        await message.answer('Не удалось получить информацию о бонусах. Попробуйте позже.')
+
+
+def get_latest_file(directory: str) -> str:
+    files = [os.path.join(directory, f) for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
+    if not files:
+        raise FileNotFoundError(f"Файлы в директории {directory} отсутствуют.")
+
+    latest_file = max(files, key=os.path.getmtime)
+    return latest_file
+
+
+@dp.message(F.text == ButtonText.get_bonus_score_of_tree)
+async def handle_bonus_score_of_tree_request(
+        message: Message,
+        state: FSMContext):
+    await message.answer('Формируется файл, пожалуйста подождите...')
+    await state.set_state(FilesStates.files)
+    try:
+        user_id = await bd_get_user_by_tg_id(message.from_user.id)
+        file_path = await api_get_user_tree_score(user_id)
+        document = FSInputFile(file_path)
+        await bot.send_document(chat_id=message.chat.id, document=document, caption="Баллы вашей структуры.")
+    except FileNotFoundError as e:
+        await message.answer(f"Ошибка: {str(e)}")
+    except Exception as e:
+        logging.error(f"Ошибка при отправке файла: {e}")
+        await message.answer("Произошла ошибка при работе с сайтом.")
+    finally:
+        await state.clear()
+
+
+@dp.message(FilesStates.files)
+async def waiting_file_message(message: Message):
+    await message.answer('Пожалуйста, подождите загрузки файла')
+
+
+def create_familiar_user_keyboard():
+    buttons = [
+        [KeyboardButton(text=ButtonText.get_bonus_score_of_tree)],
+        [KeyboardButton(text=ButtonText.get_bonus_score)],
+        [KeyboardButton(text=ButtonText.background_info)],
+    ]
+    return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+
+
+@dp.message(F.text == ButtonText.get_start)
+async def handle_start_request(message: Message):
+    await message.answer("Вы находитесь в начальном меню.", reply_markup=create_familiar_user_keyboard())
+
+
+@dp.message(F.text == ButtonText.background_info)
+async def handle_background_info_request(message: Message):
+    await message.answer('Предоставляется справочная информация:', reply_markup=create_background_info_keyboard())
 
 
 @dp.message(CommandStart())
-async def command_start_handler(message: Message) -> None:
-    await message.answer(f"Здравствуйте, {html.bold(message.from_user.full_name)}!", reply_markup=get_on_start_kb())
+async def handle_start_command(message: Message):
+    user = await bd_get_user_by_id(message.from_user.id)
+    if user is None:
+        await message.answer(f"Здравствуйте, {html.bold(message.from_user.full_name)}!",
+                             reply_markup=create_start_keyboard())
+    else:
+        await message.answer(f"Добро пожаловать, {html.bold(user['name'])}!",
+                             reply_markup=create_familiar_user_keyboard())
 
 
-@dp.message()
-async def ans_handler(message: Message) -> None:
+@dp.message(F.text)
+async def handle_message(message: Message):
     message_text = message.text
-
-    request_maker(message_text)
     try:
-        await message.reply(ans_gpt())
+        gpt_response = get_gpt_response()
+        await message.reply(gpt_response)
     except TypeError:
-        await message.answer("Что-то пошло не так")
-    is_approx = is_word_approx_in_string(message_text)
-    if (is_approx != ''):
-        await message.answer(is_approx)
+        await message.answer("Произошла ошибка при обработке запроса. Попробуйте еще раз.")
+
+    approximate_match = is_word_approx_in_string(message_text)
+    if approximate_match:
+        await message.answer(approximate_match)
 
 
 async def main():
     logging.basicConfig(level=logging.INFO)
-    bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     await dp.start_polling(bot)
 
 
