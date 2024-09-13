@@ -2,6 +2,7 @@ import random
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+import os
 
 
 def generate_password(length=6):
@@ -10,7 +11,9 @@ def generate_password(length=6):
 
 def send_email_password(recipient_email, password):
     sender_email = "pasininnikita1@gmail.com"
-    sender_password = "smvc sofj wshh dtar"
+    sender_password = os.getenv("EMAIL_PASS")
+    if not sender_password:
+        raise ValueError("Переменная окружения EMAIL_PASS не установлена")
     subject = "Ваш новый пароль"
     body = f"Ваш сгенерированный пароль: {password}"
 

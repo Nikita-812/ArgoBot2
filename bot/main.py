@@ -2,52 +2,30 @@ import asyncio
 import logging
 import os
 import sys
-from os import getenv, environ
+from os import getenv
 
 from aiogram import Bot, Dispatcher, F, html
 from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
+from aiogram.enums import ParseMode, ChatAction
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup, FSInputFile
-from dateutil import parser
 
 from ButtonText import ButtonText
-from bd import bd_reg_participant, bd_get_user_by_id, bd_get_user_by_tg_id
+from is_aproximate_word import is_town_approx_in_string
+from db.db import bd_reg_participant, bd_get_user_by_id, bd_get_user_by_tg_id
 from bot.States import RegStates, TownsStates, FilesStates
-from gpt.yandexgpt import gpt
 from internet_parsers.delivery_parse import get_sale_point_from_csv
 from internet_parsers.parse_working_hours import get_working_hours_from_file
 from requests_to_lk.work_with_api import (
     api_get_user_by_id, api_get_user_score, api_get_user_tree_score
 )
 from sending_email_messages import generate_password, send_email_password
-from utils.is_aproximate_word import is_word_approx_in_string, is_town_approx_in_string
 from validation import id_validation_filter
 
 TOKEN = getenv("BOT_TOKEN")
 dp = Dispatcher()
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-
-
-def parse_birthdate(date_str: str) -> str:
-    try:
-        parsed_date = parser.parse(date_str, dayfirst=True)
-        return parsed_date.strftime("%Y-%m-%d")
-    except (ValueError, TypeError):
-        return False
-
-
-def get_gpt_response():
-    api_key = environ.get('API_KEY')
-    headers = {'Authorization': f'Api-Key {api_key}'}
-    try:
-        response = gpt(headers).json()
-        alternatives = response['result']['alternatives']
-        return alternatives[0]['message']["text"]
-    except Exception as e:
-        logging.error(f"Ошибка при запросе к GPT: {e}")
-        return "Произошла ошибка при обработке запроса."
 
 
 def create_start_keyboard():
@@ -70,6 +48,7 @@ def create_background_info_keyboard():
 
 @dp.message(F.text == ButtonText.where)
 async def handle_where_to_buy(message: Message, state: FSMContext):
+    await bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
     await message.answer("Пожалуйста, укажите город.")
     await state.set_state(TownsStates.town)
 
@@ -201,6 +180,7 @@ async def handle_bonus_score_of_tree_request(
         message: Message,
         state: FSMContext):
     await message.answer('Формируется файл, пожалуйста подождите...')
+    await bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
     await state.set_state(FilesStates.files)
     try:
         user_id = await bd_get_user_by_tg_id(message.from_user.id)
@@ -249,20 +229,6 @@ async def handle_start_command(message: Message):
     else:
         await message.answer(f"Добро пожаловать, {html.bold(user['name'])}!",
                              reply_markup=create_familiar_user_keyboard())
-
-
-@dp.message(F.text)
-async def handle_message(message: Message):
-    message_text = message.text
-    try:
-        gpt_response = get_gpt_response()
-        await message.reply(gpt_response)
-    except TypeError:
-        await message.answer("Произошла ошибка при обработке запроса. Попробуйте еще раз.")
-
-    approximate_match = is_word_approx_in_string(message_text)
-    if approximate_match:
-        await message.answer(approximate_match)
 
 
 async def main():

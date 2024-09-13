@@ -4,7 +4,7 @@ from internet_parsers.towns import towns
 
 
 def is_word_approx_in_string(word: str, cutoff: float = 0.7) -> str:
-    with open("C:\\Users\\nikita\\PycharmProjects\\ArgoBot\\utils\\clean_name_links.csv", encoding="utf-8") as f:
+    with open("clean_name_links.csv", encoding="utf-8") as f:
         reader = csv.reader(f, delimiter=',')
 
         for row in reader:
@@ -23,11 +23,6 @@ def is_word_approx_in_string(word: str, cutoff: float = 0.7) -> str:
     return ''
 
 
-import difflib
-
-import difflib
-
-
 def is_town_approx_in_string(word: str) -> str:
     words_in_string = word.split()
     best_match = None
@@ -44,6 +39,6 @@ def is_town_approx_in_string(word: str) -> str:
 
 
 if __name__ == '__main__':
-    query = 'В мск'
-    result = is_town_approx_in_string(query)
+    query = ('расскажи про полимедел')
+    result = is_word_approx_in_string(query)
     print(result)

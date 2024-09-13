@@ -1,3 +1,5 @@
+import os.path
+
 import aiohttp
 import time
 import asyncio
@@ -85,9 +87,8 @@ def create_excel_file(file_path, name, personalpv):
     sheet['A2'] = name
     sheet['B2'] = personalpv
     sheet['B1'] = 'PersonalPV'
-
-    # Save the workbook to the specified file path
     workbook.save(file_path)
+    return file_path
 
 
 async def api_get_user_tree_score(id: int) -> str:
@@ -108,11 +109,11 @@ async def api_get_user_tree_score(id: int) -> str:
                 async with aiofiles.open(file_path, 'wb') as file:
                     await file.write(file_content)
             else:
+                if not os.path.exists("../Struct"): os.mkdir("../Struct")
                 file_path = f"../Struct/{id}.xlsx"
                 user = await api_get_user_by_id(id)
                 score = await api_get_user_score(id)
-                create_excel_file(file_path, user[1]['name'], score[1]['personalPv'])
-    return file_path
+                return create_excel_file(file_path, user[1]['name'], score[1]['personalPv'])
 
 
 async def main():
@@ -129,7 +130,7 @@ async def main():
     #     region_id=0,
     #     city_id=0
     # ))
-    await api_get_user_tree_score(1)
+    await api_get_user_tree_score(13)
 
 
 if __name__ == '__main__':

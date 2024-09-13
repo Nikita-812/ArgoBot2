@@ -3,7 +3,7 @@ import asyncio
 
 
 async def bd_reg_participant(user_data):
-    async with aiosqlite.connect('sql_bd.db') as connection:
+    async with aiosqlite.connect('../db/sql_bd.db') as connection:
         await connection.execute('''INSERT INTO users (id, api_id, name, birth_date, email, phone_number)
                                     VALUES (?, ?, ?, ?, ?, ?)''',
                                  (user_data['id'], user_data['api_id'], user_data['name'], user_data['birthDate'],
@@ -13,7 +13,7 @@ async def bd_reg_participant(user_data):
 
 
 async def bd_get_user_by_phone(phone_number: str):
-    async with aiosqlite.connect('sql_bd.db') as db:
+    async with aiosqlite.connect('../db/sql_bd.db') as db:
         cursor = await db.execute('''SELECT id, name, birth_date, email, phone_number 
                                      FROM users WHERE phone_number = ?''', (phone_number,))
         user = await cursor.fetchone()
@@ -33,7 +33,7 @@ async def bd_get_user_by_phone(phone_number: str):
 
 
 async def bd_get_user_by_id(id: int):
-    async with aiosqlite.connect('sql_bd.db') as db:
+    async with aiosqlite.connect('../db/sql_bd.db') as db:
         cursor = await db.execute('''SELECT api_id, name, birth_date, email, phone_number 
                                      FROM users WHERE api_id = ?''', (id,))
         user = await cursor.fetchone()
@@ -52,7 +52,7 @@ async def bd_get_user_by_id(id: int):
 
 
 async def on_startup():
-    async with aiosqlite.connect('sql_bd.db') as db:
+    async with aiosqlite.connect('../db/sql_bd.db') as db:
         await db.execute('''CREATE TABLE IF NOT EXISTS users (
                               id INTEGER PRIMARY KEY AUTOINCREMENT,
                               api_id INTEGER UNIQUE NOT NULL,
@@ -66,7 +66,7 @@ async def on_startup():
 
 
 async def bd_get_user_by_tg_id(tg_id: int):
-    async with aiosqlite.connect('sql_bd.db') as db:
+    async with aiosqlite.connect('../db/sql_bd.db') as db:
         cursor = await db.execute('''SELECT id, api_id, name, birth_date, email, phone_number 
                                      FROM users WHERE api_id = ?''', (tg_id,))
         user = await cursor.fetchone()
@@ -86,14 +86,6 @@ async def bd_get_user_by_tg_id(tg_id: int):
 
 async def main():
     await on_startup()
-    await bd_reg_participant(user_data={
-        'id': 3678,
-        'api_id': 13,
-        'name': 'nik',
-        'birthDate': '2022-02-21',
-        'mobilePhone': '+1555555555',
-        'email': 'nikitsoasphynin#gmai.com'
-    })
     data = await bd_get_user_by_id(3678)
     print(data)
 
