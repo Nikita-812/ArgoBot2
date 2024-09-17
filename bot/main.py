@@ -9,10 +9,11 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode, ChatAction
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup, FSInputFile
+from aiogram.types import Message, FSInputFile
 
 from ButtonText import ButtonText
-from is_aproximate_word import is_town_approx_in_string
+from bot.constructor_kb import create_start_keyboard, create_familiar_user_keyboard, create_background_info_keyboard
+from utils.is_aproximate_word import is_town_approx_in_string
 from db.db import bd_reg_participant, bd_get_user_by_id, bd_get_user_by_tg_id
 from bot.States import RegStates, TownsStates, FilesStates
 from internet_parsers.delivery_parse import get_sale_point_from_csv
@@ -20,30 +21,12 @@ from internet_parsers.parse_working_hours import get_working_hours_from_file
 from requests_to_lk.work_with_api import (
     api_get_user_by_id, api_get_user_score, api_get_user_tree_score
 )
-from sending_email_messages import generate_password, send_email_password
-from validation import id_validation_filter
+from utils.sending_email_messages import generate_password, send_email_password
+from utils.validation import id_validation_filter
 
 TOKEN = getenv("BOT_TOKEN")
 dp = Dispatcher()
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-
-
-def create_start_keyboard():
-    buttons = [
-        [KeyboardButton(text=ButtonText.delivery), KeyboardButton(text=ButtonText.times)],
-        [KeyboardButton(text=ButtonText.contact), KeyboardButton(text=ButtonText.where)],
-        [KeyboardButton(text=ButtonText.enter_account)]
-    ]
-    return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
-
-
-def create_background_info_keyboard():
-    buttons = [
-        [KeyboardButton(text=ButtonText.delivery), KeyboardButton(text=ButtonText.times)],
-        [KeyboardButton(text=ButtonText.contact), KeyboardButton(text=ButtonText.where)],
-        [KeyboardButton(text=ButtonText.get_start)]
-    ]
-    return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
 
 @dp.message(F.text == ButtonText.where)
@@ -199,15 +182,6 @@ async def handle_bonus_score_of_tree_request(
 @dp.message(FilesStates.files)
 async def waiting_file_message(message: Message):
     await message.answer('Пожалуйста, подождите загрузки файла')
-
-
-def create_familiar_user_keyboard():
-    buttons = [
-        [KeyboardButton(text=ButtonText.get_bonus_score_of_tree)],
-        [KeyboardButton(text=ButtonText.get_bonus_score)],
-        [KeyboardButton(text=ButtonText.background_info)],
-    ]
-    return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
 
 @dp.message(F.text == ButtonText.get_start)
