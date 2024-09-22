@@ -55,7 +55,10 @@ async def handle_town_selection(message: Message, state: FSMContext):
                 )
         else:
             result_message = sale_points
-        await message.answer(text=result_message, reply_markup=create_familiar_user_keyboard())
+
+        if await bd_get_user_by_id(message.from_user.id):
+            await message.answer(text=result_message, reply_markup=create_familiar_user_keyboard())
+        else: await message.answer(text=result_message, reply_markup=create_start_keyboard())
     else:
         await message.answer('Извините, но название города не распознано. Пожалуйста, попробуйте снова.')
 
@@ -141,22 +144,13 @@ async def failure_password_check(message: Message):
 
 @dp.message(F.text == ButtonText.get_bonus_score)
 async def handle_bonus_score_request(message: Message):
-    api_id = await bd_get_user_by_tg_id(message.from_user.id)
-    status, user_info = await api_get_user_score(api_id)
+    user = await bd_get_user_by_tg_id(message.from_user.id)
+    status, user_info = await api_get_user_score(user['id'])
     if status == 200:
         personal_pv = user_info['personalPv']
         await message.answer(f'Ваш персональный PV: {personal_pv}')
     else:
         await message.answer('Не удалось получить информацию о бонусах. Попробуйте позже.')
-
-
-def get_latest_file(directory: str) -> str:
-    files = [os.path.join(directory, f) for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
-    if not files:
-        raise FileNotFoundError(f"Файлы в директории {directory} отсутствуют.")
-
-    latest_file = max(files, key=os.path.getmtime)
-    return latest_file
 
 
 @dp.message(F.text == ButtonText.get_bonus_score_of_tree)
@@ -167,8 +161,10 @@ async def handle_bonus_score_of_tree_request(
     await bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
     await state.set_state(FilesStates.files)
     try:
-        user_id = await bd_get_user_by_tg_id(message.from_user.id)
-        file_path = await api_get_user_tree_score(user_id)
+        user = await bd_get_user_by_tg_id(message.from_user.id)
+        print(user)
+        file_path = await api_get_user_tree_score(user['id'])
+        print(file_path)
         document = FSInputFile(file_path)
         await bot.send_document(chat_id=message.chat.id, document=document, caption="Баллы вашей структуры.")
     except FileNotFoundError as e:
@@ -197,7 +193,7 @@ async def handle_background_info_request(message: Message):
 
 @dp.message(CommandStart())
 async def handle_start_command(message: Message):
-    user = await bd_get_user_by_id(message.from_user.id)
+    user = await bd_get_user_by_tg_id(message.from_user.id)
     if user is None:
         await message.answer(f"Здравствуйте, {html.bold(message.from_user.full_name)}!",
                              reply_markup=create_start_keyboard())
@@ -215,7 +211,6 @@ async def gpt_ans(message: Message):
 async def main():
     logging.basicConfig(level=logging.INFO)
     await dp.start_polling(bot)
-
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, stream=sys.stdout)

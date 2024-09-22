@@ -7,6 +7,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
+import pathlib
 
 
 def get_sale_points(city_name):
@@ -85,7 +86,9 @@ def get_sale_points(city_name):
 
 
 def get_sale_point_from_csv(city_name):
-    with open("C:\\Users\\nikita\\PycharmProjects\\ArgoBot\\internet_parsers\\sale_points.csv", encoding='utf-8') as f:
+    data_file = pathlib.Path(__file__).parent
+    data_file = data_file.joinpath('sale_points.csv')
+    with open(data_file, encoding='utf-8') as f:
         data = csv.DictReader(f)
         sale_points = []
         for row in data:
@@ -96,4 +99,5 @@ def get_sale_point_from_csv(city_name):
 
 if __name__ == "__main__":
     city = "Москва"
-    get_sale_point_from_csv(city)
+    print(get_sale_point_from_csv(city))
+

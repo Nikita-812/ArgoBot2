@@ -20,8 +20,8 @@ def get_gpt_rag_answer(query):
                 embedding_function=embeddings)
 
     retriever = db.as_retriever(
-        search_type="similarity_score_threshold",
-        search_kwargs={"k": 1, "score_threshold": 0.01},
+        search_type="mmr",
+        search_kwargs={"k": 1, "lambda_mult": 0.5},
     )
     relevant_docs = retriever.invoke(query)
 
@@ -36,7 +36,7 @@ def get_gpt_rag_answer(query):
             + query
             + "\n\nСоответствующие документы:\n"
             + "\n\n".join([doc.page_content for doc in relevant_docs])
-            + "\n\nПросим дать ответ только на основании предоставленных документов. Если ответ не найден в документах, ответьте у меня нет информации об этом продукте."
+            + "\n\nПросим дать ответ только на основании предоставленных документов, если в документе есть ссылка на продукт вставь ее в ответ с фразой 'более полную информацию вы можете получить здесь: '. Если тебя просят что-нибудь посоветовать, в конце ответа обязательно порекомендуй обратиться к врачу. Если документа нет, ответьте у меня нет информации об этом."
     )
 
     # Create a ChatOpenAI model
@@ -63,4 +63,4 @@ def get_gpt_rag_answer(query):
 
 
 if __name__ == '__main__':
-    get_gpt_rag_answer('посоветуй что-нибудь от давления?')
+    get_gpt_rag_answer('посоветуй какой-нибудь крем для кожи?')

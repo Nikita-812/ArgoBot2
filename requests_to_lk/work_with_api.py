@@ -6,6 +6,7 @@ import asyncio
 import aiofiles
 import ssl
 from openpyxl import Workbook
+from pathlib import Path
 
 headers = {
     'accept': 'application/json',
@@ -110,9 +111,11 @@ async def api_get_user_tree_score(id: int) -> str:
                     await file.write(file_content)
             else:
                 if not os.path.exists("../Struct"): os.mkdir("../Struct")
-                file_path = f"../Struct/{id}.xlsx"
+
+                file_path = file_path = Path(__file__).parent.parent / 'Struct' / f"{id}.xlsx"
                 user = await api_get_user_by_id(id)
                 score = await api_get_user_score(id)
+
                 return create_excel_file(file_path, user[1]['name'], score[1]['personalPv'])
 
 
@@ -130,7 +133,7 @@ async def main():
     #     region_id=0,
     #     city_id=0
     # ))
-    await api_get_user_tree_score(13)
+    print(await api_get_user_tree_score(13))
 
 
 if __name__ == '__main__':
