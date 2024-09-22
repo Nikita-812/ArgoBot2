@@ -23,6 +23,7 @@ from requests_to_lk.work_with_api import (
 )
 from utils.sending_email_messages import generate_password, send_email_password
 from utils.validation import id_validation_filter
+from gptapi.gpt import get_gpt_rag_answer
 
 TOKEN = getenv("BOT_TOKEN")
 dp = Dispatcher()
@@ -203,6 +204,12 @@ async def handle_start_command(message: Message):
     else:
         await message.answer(f"Добро пожаловать, {html.bold(user['name'])}!",
                              reply_markup=create_familiar_user_keyboard())
+
+
+@dp.message(F.text)
+async def gpt_ans(message: Message):
+    prompt = message.text
+    await message.answer(get_gpt_rag_answer(prompt))
 
 
 async def main():
