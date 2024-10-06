@@ -1,62 +1,134 @@
-import os
-
-from langchain.text_splitter import CharacterTextSplitter
-from langchain_community.document_loaders import TextLoader
-from langchain_community.vectorstores import Chroma
-from langchain_core.documents import Document
-from langchain_openai import OpenAIEmbeddings
-from dotenv import load_dotenv
 import pandas as pd
+import asyncio
+import aiohttp
+import aiofiles
+import re
+import openai
+import chromadb
+from typing import List
+import os
+from dotenv import load_dotenv
 
+# Загрузка переменных окружения
 load_dotenv()
-print(os.getenv("OPENAI_API_KEY"))
+# Установка API-ключа OpenAI
 
-# Define the directory containing the text file and the persistent directory
+# Колонки с текстом из CSV файла
+text_columns = [
+    'GOODS_NAME', 'GOODS_URL', 'GOODS_PV', 'GOODS_CONDITION', 'GOODS_ANTY_CONDITION', 'GOODS_RECOMMENDATION',
+    'GOODS_PROPERTY', 'GOODS_COMPOSITION', 'GOODS_PACKING', 'GOODS_WEIGHT', 'CATALOG_NAME', 'CATALOG_FULL_NAME',
+    "CATEGORY"
+]
 
-current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-file_path = os.path.join(current_dir, "data", "products.csv")
-persistent_directory = os.path.join(current_dir, "gptapi", "db", "chroma_db")
 
-# Check if the Chroma vector store already exists
-if not os.path.exists(persistent_directory):
-    print("Persistent directory does not exist. Initializing vector store...")
+def clean_text(text: str) -> str:
+    """
+    Очищает текст от HTML-тегов и лишних символов, при этом оставляя URL-адреса.
+    """
+    if not isinstance(text, str):
+        return ''
+    # Удаление HTML-тегов
+    text = re.sub(r'<[^>]+>', '', text)
+    # Удаление ненужных символов, кроме тех, которые используются в URL
+    text = re.sub(r'[^\w\s:/.-]', '', text)
+    return text.strip()
 
-    # Ensure the text file exists
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(
-            f"The file {file_path} does not exist. Please check the path."
+
+async def load_and_preprocess_data(csv_file: str) -> pd.DataFrame:
+    """
+    Асинхронно загружает и обрабатывает данные из CSV файла.
+    Очищает текстовые колонки и объединяет их в одно текстовое поле.
+    """
+    async with aiofiles.open(csv_file, mode='r', encoding='utf-8') as f:
+        content = await f.read()
+    from io import StringIO
+    df = pd.read_csv(StringIO(content))
+    # Очистка текстовых колонок
+    for col in text_columns:
+        if col in df.columns:
+            df[col] = df[col].apply(clean_text)
+        else:
+            df[col] = ''
+    # Объединение всех текстовых колонок в одно текстовое поле
+    df['combined_text'] = df[text_columns].fillna('').agg(' '.join, axis=1)
+    return df
+
+
+async def generate_embeddings(texts: List[str]) -> List[List[float]]:
+    """
+    Генерирует эмбеддинги для списка текстов через OpenAI API.
+    Работает пакетами для ускорения обработки.
+    """
+    embeddings = []
+    batch_size = 16  # Размер пакета для API-запросов
+    url = 'https://api.openai.com/v1/embeddings'
+    headers = {
+        'Authorization': f'Bearer {openai.api_key}',
+        'Content-Type': 'application/json'
+    }
+
+    async with aiohttp.ClientSession() as session:
+        tasks = []
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+            data = {
+                'input': batch,
+                'model': 'text-embedding-ada-002'
+            }
+            tasks.append(fetch_embedding(session, url, headers, data))
+        # Выполнение всех запросов асинхронно
+        results = await asyncio.gather(*tasks)
+        # Извлечение эмбеддингов из ответов
+        for result in results:
+            for item in result['data']:
+                embeddings.append(item['embedding'])
+    return embeddings
+
+
+async def fetch_embedding(session, url, headers, data):
+    """
+    Асинхронная функция для выполнения запроса на получение эмбеддингов.
+    """
+    async with session.post(url, headers=headers, json=data) as resp:
+        response = await resp.json()
+        return response
+
+
+async def main():
+    # Путь к CSV файлу с данными
+    csv_file = '/home/nik/PycharmProjects/ArgoBot21/data/cleaned_products.csv'
+    # Загрузка и предварительная обработка данных
+    df = await load_and_preprocess_data(csv_file)
+    # Генерация эмбеддингов для всех продуктов
+    texts = df['combined_text'].tolist()
+    embeddings = await generate_embeddings(texts)
+
+    # Инициализация ChromaDB клиента с указанием директории для сохранения данных
+    client =chromadb.PersistentClient()
+
+    # Создание или получение коллекции 'products'
+    try:
+        collection = client.create_collection(name='products')
+    except chromadb.errors.CollectionAlreadyExistsError:
+        collection = client.get_collection(name='products')
+
+
+
+    # Добавление эмбеддингов и метаданных в коллекцию
+    def blocking_add():
+        collection.add(
+            embeddings=embeddings,
+            documents=texts,
+            metadatas=df.to_dict('records'),
+            ids=[str(i) for i in df.index]
         )
 
-    df = pd.read_csv(file_path, sep=';', encoding='')
+    # Асинхронный вызов для добавления данных
+    await asyncio.to_thread(blocking_add)
 
-    text_columns = [
-        'GOODS_NAME', "GOODS_URL", 'GOODS_CONDITION', 'GOODS_ANTY_CONDITION',
-        'GOODS_RECOMMENDATION', 'GOODS_PROPERTY'
-    ]
+    print("Векторная база данных успешно создана и сохранена.")
 
-    df['combined_text'] = df[text_columns].apply(lambda row: ' '.join(row.dropna()), axis=1)
-    documents = df['combined_text']
-    documents = [Document(page_content=text) for text in df['combined_text'].tolist()]
 
-    # Split the document into chunks
-    text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=200, separator='\t')
-    docs = text_splitter.split_documents(documents)
+if __name__ == "__main__":
+    asyncio.run(main())
 
-    # Create embeddings
-    print("\n--- Creating embeddings ---")
-    embeddings = OpenAIEmbeddings(
-        model="text-embedding-3-small"
-    )  # Update to a valid embedding model if needed
-    print("\n--- Finished creating embeddings ---")
-
-    # Create the vector store and persist it automatically
-    print("\n--- Creating vector store ---")
-    db = Chroma.from_documents(
-        docs, embeddings, persist_directory=persistent_directory)
-    print("\n--- Finished creating vector store ---")
-    print("\n--- Document Chunks Information ---")
-    print(f"Number of document chunks: {len(docs)}")
-    # print(f"Sample chunk:\n{docs[0].page_content}\n")
-
-else:
-    print("Vector store already exists. No need to initialize.")

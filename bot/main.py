@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import os
 import sys
 from os import getenv
 
@@ -23,7 +22,7 @@ from requests_to_lk.work_with_api import (
 )
 from utils.sending_email_messages import generate_password, send_email_password
 from utils.validation import id_validation_filter
-from gptapi.gpt import get_gpt_rag_answer
+from gptapi.gpt import generate_response
 
 TOKEN = getenv("BOT_TOKEN")
 dp = Dispatcher()
@@ -205,7 +204,7 @@ async def handle_start_command(message: Message):
 @dp.message(F.text)
 async def gpt_ans(message: Message):
     prompt = message.text
-    await message.answer(get_gpt_rag_answer(prompt))
+    await message.answer(await generate_response(prompt))
 
 
 async def main():
