@@ -2,27 +2,34 @@ import asyncio
 import aiohttp
 import openai
 import chromadb
+from chromadb.config import Settings
 from typing import List
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# Колонки, которые нужно извлечь из метаданных продукта
-text_columns = [
+# Колонки для извлечения из метаданных продуктов
+product_columns = [
     'GOODS_NAME', 'GOODS_URL', 'GOODS_PV', 'GOODS_CONDITION', 'GOODS_ANTY_CONDITION', 'GOODS_RECOMMENDATION',
     'GOODS_PROPERTY', 'GOODS_COMPOSITION', 'GOODS_PACKING', 'GOODS_WEIGHT', 'CATALOG_NAME', 'CATALOG_FULL_NAME',
-    "CATEGORY"
+    'CATEGORY'
+]
+
+# Колонки для извлечения из метаданных FAQ
+faq_columns = [
+    'question', 'answer'
 ]
 
 async def generate_query_embedding(query_text: str) -> List[float]:
     """
-    Генерирует эмбеддинг для текста запроса пользователя с помощью OpenAI API.
+    Генерация эмбеддинга для запроса пользователя с использованием OpenAI API.
     """
     url = 'https://api.openai.com/v1/embeddings'
     headers = {
-        'Authorization': f'Bearer {os.getenv("OPENAI_API_KEY")}',
+        'Authorization': f'Bearer {openai.api_key}',
         'Content-Type': 'application/json'
     }
     data = {
@@ -35,49 +42,62 @@ async def generate_query_embedding(query_text: str) -> List[float]:
             query_embedding = response['data'][0]['embedding']
     return query_embedding
 
-async def query_database(query_text: str) -> str:
+async def query_database(query_text: str) -> List[str]:
     """
-    Выполняет запрос к векторной базе данных с использованием эмбеддинга запроса
-    и возвращает наиболее релевантную информацию о продукте.
+    Поиск в векторной базе данных по эмбеддингу запроса и возвращение релевантной информации.
     """
     # Генерация эмбеддинга для запроса
     query_embedding = await generate_query_embedding(query_text)
-    persist_directory = "/home/nik/PycharmProjects/ArgoBot21/gptapi/chroma"
-    client = chromadb.PersistentClient(persist_directory)
+    
+    # Подключение к асинхронному клиенту ChromaDB
+    client = await chromadb.AsyncHttpClient(host='localhost', port = 8000)
+    
     try:
-        collection = client.get_collection(name='products')
+        # Получение коллекции 'chroma'
+        collection = await client.get_collection(name='chroma')
     except chromadb.errors.InvalidCollectionException:
-        print("Коллекция 'products' не найдена. Убедитесь, что база данных была создана и сохранена правильно.")
-        return ''
-    # Выполнение запроса для поиска наиболее похожего продукта
-    def blocking_query():
-        results = collection.query(
-            query_embeddings=[query_embedding],
-            n_results=1
-        )
-        return results
-    # Выполнение блокирующего запроса в отдельном потоке
-    results = await asyncio.to_thread(blocking_query)
-    # Обработка и отображение результата
+        print("Коллекция 'chroma' не найдена. Убедитесь, что база данных создана правильно.")
+        return []
+    
+    # Выполнение запроса для нахождения наиболее похожих записей
+    results = await collection.query(
+        query_embeddings=[query_embedding],
+        n_results=3
+    )
+    
+    # Обработка и возврат результатов
+    responses = []
     if results['documents']:
-        # Извлечение информации о продукте
-        product_info = results['documents'][0][0]
-        product_metadata = results['metadatas'][0][0]
-        # Форматирование информации о продукте в строку
-        product_data = ''
-        for col in text_columns:
-            value = product_metadata.get(col, '')
-            if value:
-                product_data += f"{col}: {value}\n"
-        # Вывод информации (можно вернуть или отправить пользователю в боте)
-        return product_data
+        for docs, metadatas in zip(results['documents'], results['metadatas']):
+            for doc, metadata in zip(docs, metadatas):
+                # Определение, является ли запись продуктом или FAQ
+                if 'question' in metadata and 'answer' in metadata:
+                    # Это запись из FAQ
+                    response = f"Вопрос: {metadata['question']}\nОтвет: {metadata['answer']}"
+                else:
+                    # Это запись продукта
+                    response = ''
+                    for col in product_columns:
+                        value = metadata.get(col, '')
+                        if value:
+                            response += f"{col}: {value}\n"
+                    if not response:
+                        response = doc  # Используем текст документа по умолчанию
+                responses.append(response)
     else:
-        return 'Товар не найден.'
+        responses.append('Извините, ответ не найден.')
+    
+    return responses
 
 async def main():
-    # Пример запроса пользователя
-    query_text = 'посоветуй что-нибудь от гипертонии?'
-    print(await query_database(query_text))
+    # Ввод запроса пользователя
+    query_text = input("Введите ваш вопрос: ")
+    responses = await query_database(query_text)
+    print("\nОтветы:")
+    for response in responses:
+        print(response)
+        print("-" * 50)
 
 if __name__ == "__main__":
     asyncio.run(main())
+
