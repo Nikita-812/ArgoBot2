@@ -8,19 +8,15 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
 import pathlib
-
+from webdriver_manager.chrome import ChromeDriverManager
 
 def get_sale_points(city_name):
     options = Options()
     options.add_argument('--headless')  # Запуск браузера в фоновом режиме
     options.add_argument('--disable-gpu')
 
-    # Укажите путь к драйверу ChromeDriver
-    chromedriver_path = "C:\\Users\\nikita\\PycharmProjects\\ArgoBot\\chromedrive\\chromedriver.exe"
-    service = Service(chromedriver_path)
-
     # Инициализация WebDriver
-    driver = webdriver.Chrome(service=service, options=options)
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
     try:
         # Открытие целевой страницы
@@ -75,11 +71,11 @@ def get_sale_points(city_name):
             phone = cells[3].get_text(strip=True)
             email = cells[4].get_text(strip=True)
             sale_points.append({
-                'town': city_name,
-                'address': address,
-                'payment_methods': payment_methods,
-                'phone': phone,
-                'email': email
+                'City': city_name,
+                'Address': address,
+                'Payment_methods': payment_methods,
+                'Phone': phone,
+                'Email': email
             })
 
     return sale_points
@@ -94,10 +90,9 @@ def get_sale_point_from_csv(city_name):
         for row in data:
             if row['City'] == city_name:
                 sale_points.append(row)
-    return sale_points
-
+    return sale_points  
 
 if __name__ == "__main__":
-    city = "Москва"
+    city = "Новосибирск"
     print(get_sale_point_from_csv(city))
 

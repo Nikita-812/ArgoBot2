@@ -8,7 +8,8 @@ with open('sale_points.csv', 'w', newline='', encoding='utf-8') as f:
     # Создаем объект writer с разделителем ','
     writer = csv.writer(f, delimiter=',')
 
-    # Проходим по списку городов
+    writer.writerow("City,Address,Payment_method,Phone,Email")
+
     for town in towns:
         sale_points = get_sale_points(town)
 

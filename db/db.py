@@ -1,12 +1,22 @@
 import psycopg
 from psycopg.rows import dict_row
 import asyncio
+import os
+import dotenv
 
-host = '127.0.0.1'
-user = 'postgres'
-password = ''
-port = 5432
+dotenv.load_dotenv()
 
+
+
+host = os.getenv("HOST_POSTGRES")
+user = os.getenv("POSTGRES_NAME")
+password = os.getenv("DB_PASSWORD")
+port = os.getenv("POSTGRES_PORT")
+
+print(host)
+print(user)
+print(password)
+print(port)
 # Асинхронное подключение к базе данных PostgreSQL
 async def connect_db():
     try:
@@ -15,7 +25,7 @@ async def connect_db():
             user=user,
             password=password,
             host=host,
-            port="5432"
+            port=port
         )
         return conn
     except Exception as e:

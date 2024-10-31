@@ -2,6 +2,7 @@
 venv/
 .env
 
+chroma_data/
 # Игнорирование служебных файлов Python
 __pycache__/
 *.pyc
