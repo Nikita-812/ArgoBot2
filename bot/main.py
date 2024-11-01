@@ -314,8 +314,9 @@ async def gpt_ans(message: Message) -> None:
     Handles all other text messages and generates a response using GPT.
     """
     prompt = message.text
+    await bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
     response = await generate_response(prompt)
-    await message.answer(response)
+    await message.answer(response, parse_mode=ParseMode.MARKDOWN)
 
 
 # Main function

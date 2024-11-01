@@ -2,8 +2,8 @@ from openai import AsyncOpenAI
 import os
 import asyncio
 from .get_product_context import query_database
-aclient = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+aclient = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
 async def generate_response(user_query: str) -> str:
@@ -16,8 +16,7 @@ async def generate_response(user_query: str) -> str:
             + "\n\nСоответствующие документы:\n"
             + "\n\n" + ''.join(await query_database(user_query))
             + "\n\nПросим дать ответ только на основании предоставленных документов, если в документе есть ссылка на продукт вставь ее в ответ с фразой 'более полную информацию вы можете получить здесь: '. Если тебя просят что-нибудь посоветовать, продуктов, в конце ответа обязательно порекомендуй обратиться к врачу. Если документа нет, ответьте у меня нет информации об этом. Если ты получаешь несколько подходящих продуктов, выбери из них наиболее подходящие и выведи списком с ссылками. Если нужно дать ссылку на основной сайт компании то вот она: https://argo.company."
-    )
-
+                               )
     try:
         response = await aclient.chat.completions.create(model="gpt-4o-mini",
         messages=[
