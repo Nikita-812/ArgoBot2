@@ -9,6 +9,7 @@ from aiogram.enums import ChatAction, ParseMode
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import FSInputFile, Message
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 
 from ButtonText import ButtonText
 from bot.States import FilesStates, RegStates, TownsStates
@@ -31,7 +32,7 @@ from utils.validation import id_validation_filter
 # Initialize logging
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
-
+user_reports = {}
 # Initialize bot and dispatcher
 TOKEN = getenv("BOT_TOKEN")
 if not TOKEN:
@@ -307,6 +308,48 @@ async def handle_start_command(message: Message) -> None:
             reply_markup=create_familiar_user_keyboard()
         )
 
+@dp.callback_query(F.data.startswith("report_"))
+async def process_report(callback_query: CallbackQuery):
+     """
+     Handles the user's feedback from inline buttons.
+     """
+     user_id = callback_query.from_user.id
+     feedback = callback_query.data
+
+     if feedback == "report_yes":
+         await callback_query.answer("Glad to hear that! 😊")
+     elif feedback == "report_no":
+         report = user_reports.get(user_id)
+         if report:
+             question = report['question']
+             response = report['response']
+             # Append the report to a file
+             with open("unsatisfactory_reports.txt", "a", encoding="utf-8") as f:
+                 f.write(f"User: {question}\nAssistant: {response}\n\n")
+             await callback_query.answer("Sorry the answer was not helpful. We've recorded your feedback. 📄")
+         else:
+             await callback_query.answer("No report found. Please try again.", show_alert=True)
+     else:
+         await callback_query.answer("Unknown action.", show_alert=True)
+
+     # Optionally, remove the inline buttons after feedback
+     await callback_query.message.edit_reply_markup(reply_markup=None)
+
+async def get_report_from_user(message: Message, response: str):
+     """
+     Asks the user if the assistant's answer was helpful using inline buttons.
+     If not, records the user's question and the assistant's response.
+     """
+     user_reports[message.from_user.id] = {
+        'question': message.text,
+        'response': response
+        }
+     buttons = [
+         InlineKeyboardButton(text="✅ Yes", callback_data="report_yes"),
+         InlineKeyboardButton(text="❌ No", callback_data="report_no")
+     ]
+     keyboard = InlineKeyboardMarkup(inline_keyboard=[buttons])
+     await message.answer("Помог ли вам ответ ассистента?", reply_markup=keyboard)
 
 @dp.message(F.text)
 async def gpt_ans(message: Message) -> None:
@@ -315,10 +358,9 @@ async def gpt_ans(message: Message) -> None:
     """
     prompt = message.text
     await bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
-    response = await generate_response(prompt)
+    response = await generate_response(str(prompt))
     await message.answer(response, parse_mode=ParseMode.MARKDOWN)
-
-
+    await get_report_from_user(message, response)
 # Main function
 
 async def main():

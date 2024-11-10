@@ -1,41 +1,27 @@
-import os
-import re
-import json
+import pandas as pd
+from io import StringIO
 import asyncio
 import aiohttp
 import aiofiles
-import pandas as pd
-from io import StringIO
-from dotenv import load_dotenv
-from typing import List, Tuple
-import nltk
-from nltk.corpus import stopwords
-from nltk.stem import WordNetLemmatizer
+import re
 import openai
+from chromadb.config import Settings
 import chromadb
-import logging
+from typing import List, Tuple
+import os
+from dotenv import load_dotenv
+import json
 
-# Загрузка переменных окружения и API ключа OpenAI
+# Загрузка переменных окружения
 load_dotenv()
+# Установка API ключа OpenAI
 openai.api_key = os.getenv("OPENAI_API_KEY")
-if not openai.api_key:
-    raise ValueError("API ключ OpenAI не найден. Пожалуйста, установите переменную окружения OPENAI_API_KEY.")
-
-# Настройка логирования
-logging.basicConfig(level=logging.INFO)
-
-# Загрузка необходимых ресурсов NLTK
-nltk.download('stopwords')
-nltk.download('punkt_tab')
-nltk.download('wordnet')
-
-# Инициализация стоп-слов и лемматизатора
-stop_words = set(stopwords.words('russian'))
-lemmatizer = WordNetLemmatizer()
 
 # Список текстовых колонок для извлечения из CSV файлов
 text_columns = [
-    'GOODS_NAME', 'GOODS_DESCRIPTION'  # Предполагая, что 'GOODS_DESCRIPTION' содержит описание товара
+    'GOODS_NAME', 'GOODS_URL', 'GOODS_PV', 'GOODS_CONDITION', 'GOODS_ANTY_CONDITION', 'GOODS_RECOMMENDATION',
+    'GOODS_PROPERTY', 'GOODS_COMPOSITION', 'GOODS_PACKING', 'GOODS_WEIGHT', 'CATALOG_NAME', 'CATALOG_FULL_NAME',
+    'CATEGORY'
 ]
 
 # Папка с данными
@@ -43,78 +29,48 @@ data_folder = './rag_data/'  # Замените на путь к вашей па
 
 def clean_text(text: str) -> str:
     """
-    Очищает и нормализует текст: удаляет HTML теги, специальные символы,
-    приводит к нижнему регистру, удаляет стоп-слова и выполняет лемматизацию.
+    Очищает текст от HTML тегов и ненужных символов, сохраняя URL-адреса.
     """
     if not isinstance(text, str):
         return ''
     # Удаление HTML тегов
     text = re.sub(r'<[^>]+>', '', text)
-    # Приведение к нижнему регистру
-    text = text.lower()
-    # Удаление специальных символов и цифр
-    text = re.sub(r'[^\w\s]', '', text)
-    # Токенизация
-    tokens = nltk.word_tokenize(text)
-    # Удаление стоп-слов и лемматизация
-    tokens = [lemmatizer.lemmatize(word) for word in tokens if word not in stop_words]
-    return ' '.join(tokens).strip()
-
-def chunk_text(text: str, max_tokens: int = 500) -> List[str]:
-    """
-    Разбивает текст на чанки, не превышающие max_tokens по количеству слов.
-    """
-    sentences = re.split(r'(?<=[.!?]) +', text)
-    chunks = []
-    current_chunk = ''
-    for sentence in sentences:
-        if len((current_chunk + ' ' + sentence).split()) <= max_tokens:
-            current_chunk += ' ' + sentence
-        else:
-            chunks.append(current_chunk.strip())
-            current_chunk = sentence
-    if current_chunk:
-        chunks.append(current_chunk.strip())
-    return chunks
-
+    # Удаление ненужных символов, кроме используемых в URL
+    text = re.sub(r'[^\w\s:/\.-]', '', text)
+    return text.strip()
 async def load_and_preprocess_csv(csv_file: str) -> Tuple[List[str], List[dict]]:
     """
     Асинхронная загрузка и предобработка данных из CSV файла.
+    Очищает текстовые колонки и объединяет их в одно текстовое поле.
+    
+    Parameters:
+    - csv_file: путь к CSV файлу
+    - text_columns: список колонок с текстом для очистки и объединения
+    
+    Returns:
+    - texts: список строк с объединенным текстом из указанных колонок
+    - metadatas: список словарей, содержащий записи из DataFrame
     """
     async with aiofiles.open(csv_file, mode='r', encoding='utf-8') as f:
         content = await f.read()
     
     # Чтение CSV файла
-    df = pd.read_csv(StringIO(content), sep='\t')
+    df = pd.read_csv(StringIO(content), sep = '\t')
 
-    # Проверка наличия необходимых колонок
+    # Очистка и объединение текстовых колонок
     for col in text_columns:
-        if col not in df.columns:
+        if col in df.columns:
+            df[col] = df[col].apply(clean_text)
+        else:
+            # Если колонки нет, добавляем пустую колонку
             df[col] = ''
-
-    # Очистка текстовых колонок
-    for col in text_columns:
-        df[col] = df[col].apply(clean_text)
-
-    # Объединение текстовых колонок
+    
+    # Объединение всех текстовых колонок в одно поле
     df['combined_text'] = df[text_columns].fillna('').agg(' '.join, axis=1)
 
-    texts = []
-    metadatas = []
-
-    # Определение необходимых метаданных
-    metadata_columns = ['GOODS_NAME', 'CATEGORY', 'GOODS_URL']
-
-    for _, row in df.iterrows():
-        text_chunks = chunk_text(row['combined_text'])
-        for idx, chunk in enumerate(text_chunks):
-            texts.append(chunk)
-            metadatas.append({
-                'goods_name': row.get('GOODS_NAME', ''),
-                'category': row.get('CATEGORY', ''),
-                'goods_url': row.get('GOODS_URL', ''),
-                'chunk_index': idx
-            })
+    # Преобразуем в нужные форматы
+    texts = df['combined_text'].tolist()
+    metadatas = df.to_dict('records')
 
     return texts, metadatas
 
@@ -131,41 +87,20 @@ async def load_and_preprocess_json(json_file: str) -> Tuple[List[str], List[dict
         question = clean_text(entry.get('text', ''))
         answer = clean_text(entry.get('response', ''))
         combined_text = f"Вопрос: {question}\nОтвет: {answer}"
-        text_chunks = chunk_text(combined_text)
-        for idx, chunk in enumerate(text_chunks):
-            texts.append(chunk)
-            metadatas.append({
-                'question': question,
-                'answer': answer,
-                'chunk_index': idx
-            })
+        texts.append(combined_text)
+        metadatas.append({
+            'question': question,
+            'answer': answer
+        })
     return texts, metadatas
-
-async def fetch_embedding(session, url, headers, data, max_retries=5):
-    """
-    Асинхронная функция для выполнения API запроса эмбеддинга с обработкой ошибок и повторными попытками.
-    """
-    for attempt in range(max_retries):
-        try:
-            async with session.post(url, headers=headers, json=data) as resp:
-                response = await resp.json()
-                if resp.status == 200:
-                    return response
-                else:
-                    logging.error(f"Ошибка {resp.status}: {response}")
-        except Exception as e:
-            logging.error(f"Исключение при попытке {attempt+1}: {e}")
-        wait_time = 2 ** attempt
-        await asyncio.sleep(wait_time)
-    raise Exception("Превышено количество попыток для fetch_embedding")
 
 async def generate_embeddings(texts: List[str]) -> List[List[float]]:
     """
     Генерация эмбеддингов для списка текстов с использованием OpenAI API.
-    Работает пакетами для ускорения обработки и включает обработку ошибок.
+    Работает пакетами для ускорения обработки.
     """
     embeddings = []
-    batch_size = 64  # Оптимальный размер пакета (можно настроить)
+    batch_size = 16  # Размер пакета для API запросов
     url = 'https://api.openai.com/v1/embeddings'
     headers = {
         'Authorization': f'Bearer {openai.api_key}',
@@ -189,73 +124,66 @@ async def generate_embeddings(texts: List[str]) -> List[List[float]]:
                 embeddings.append(item['embedding'])
     return embeddings
 
-async def process_file(file_path: str) -> Tuple[List[str], List[dict]]:
+async def fetch_embedding(session, url, headers, data):
     """
-    Асинхронная обработка отдельного файла.
+    Асинхронная функция для выполнения API запроса эмбеддинга.
     """
-    if file_path.endswith('.csv'):
-        return await load_and_preprocess_csv(file_path)
-    elif file_path.endswith('.json'):
-        return await load_and_preprocess_json(file_path)
-    else:
-        return [], []
+    async with session.post(url, headers=headers, json=data) as resp:
+        response = await resp.json()
+        return response
 
 async def process_files_in_folder(folder: str) -> Tuple[List[str], List[dict]]:
     """
     Асинхронная обработка всех файлов в указанной папке, возвращает тексты и метаданные.
     """
-    tasks = []
+    texts = []
+    metadatas = []
+
     for root, _, files in os.walk(folder):
         for file in files:
             file_path = os.path.join(root, file)
-            tasks.append(process_file(file_path))
-    results = await asyncio.gather(*tasks)
-    texts, metadatas = [], []
-    for res_texts, res_metadatas in results:
-        texts.extend(res_texts)
-        metadatas.extend(res_metadatas)
+            if file.endswith('.csv'):
+                # Обработка CSV файла
+                csv_texts, csv_metadatas = await load_and_preprocess_csv(file_path)
+                texts.extend(csv_texts)
+                metadatas.extend(csv_metadatas)
+            elif file.endswith('.json'):
+                # Обработка JSON файла
+                json_texts, json_metadatas = await load_and_preprocess_json(file_path)
+                texts.extend(json_texts)
+                metadatas.extend(json_metadatas)
+
     return texts, metadatas
 
 async def main():
     # Загрузка и предобработка всех данных из папки
     texts, metadatas = await process_files_in_folder(data_folder)
 
-    # Проверка соответствия количества текстов и метаданных
-    assert len(texts) == len(metadatas), "Количество текстов и метаданных не совпадает."
-
     # Генерация эмбеддингов для всех текстов
     embeddings = await generate_embeddings(texts)
 
-    # Проверка соответствия количества текстов и эмбеддингов
-    assert len(texts) == len(embeddings), "Количество текстов и эмбеддингов не совпадает."
+    # Подключение к асинхронному клиенту ChromaDB
+    client = await chromadb.AsyncHttpClient(host='localhost', port = 8000)
 
-    # Подключение к клиенту ChromaDB
-    client = chromadb.Client()  # Используем синхронный клиент для простоты
-
-    collection_name = 'chroma'
-
-    # Проверка наличия коллекции и создание при необходимости
-    if collection_name in [col.name for col in client.list_collections()]:
-        collection = client.get_collection(name=collection_name)
-        logging.info(f"Коллекция '{collection_name}' успешно найдена.")
-    else:
-        logging.info(f"Коллекция '{collection_name}' не найдена. Создаём новую коллекцию.")
-        collection = client.create_collection(
-            name=collection_name,
-            metadata={"hnsw:space": "cosine"}
-        )
-        logging.info(f"Коллекция '{collection_name}' успешно создана.")
+    try:
+        # Попытка получить коллекцию 'chroma'
+        collection = await client.get_collection(name='chroma')
+        print("Коллекция 'chroma' успешно найдена.")
+    except chromadb.errors.InvalidCollectionException:
+        # Если коллекция не найдена, создаём её
+        print("Коллекция 'chroma' не найдена. Создаём новую коллекцию.")
+        collection = await client.create_collection(name='chroma')
+        print("Коллекция 'chroma' успешно создана.")
 
     # Добавление эмбеддингов и метаданных в коллекцию
-    collection.add(
+    await collection.add(
         embeddings=embeddings,
         documents=texts,
         metadatas=metadatas,
         ids=[str(i) for i in range(len(texts))]
     )
 
-    logging.info("Векторная база данных успешно создана и сохранена.")
+    print("Векторная база данных успешно создана и сохранена.")
 
 if __name__ == "__main__":
     asyncio.run(main())
-
