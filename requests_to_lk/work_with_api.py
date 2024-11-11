@@ -45,7 +45,7 @@ async def api_post_new_participant(data):
     ssl_context.check_hostname = False
     ssl_context.verify_mode = ssl.CERT_NONE
     async with aiohttp.ClientSession() as session:
-        async with session.post("https://192.168.0.15/DailyNews/Participant", headers=HEADERS, json=data,
+        async with session.post("https://217.26.1.106/DailyNews/Participant", headers=HEADERS, json=data,
                                 ssl=ssl_context) as response:
             logger.info("Status: %s", response.status)
             html = await response.text()
@@ -56,7 +56,7 @@ async def api_get_user_by_id(user_id: int):
     ssl_context.check_hostname = False
     ssl_context.verify_mode = ssl.CERT_NONE
     async with aiohttp.ClientSession() as session:
-        async with session.get(f"https://192.168.0.15/DailyNews/Participant/{user_id}", headers=HEADERS,
+        async with session.get(f"https://217.26.1.106/DailyNews/Participant/{user_id}", headers=HEADERS,
                                ssl=ssl_context) as response:
             logger.info("Status: %s", response.status)
             html = await response.json()
@@ -71,7 +71,7 @@ async def api_get_user_score(user_id: int):
     ssl_context.check_hostname = False
     ssl_context.verify_mode = ssl.CERT_NONE
     async with aiohttp.ClientSession() as session:
-        async with session.get(f"https://192.168.0.15/DailyNews/BonusBalance/{user_id}", headers=headers,
+        async with session.get(f"https://217.26.1.106/DailyNews/BonusBalance/{user_id}", headers=headers,
                                ssl=ssl_context) as response:
             logger.info("Status: %s", response.status)
             html = await response.json()
@@ -109,7 +109,7 @@ async def api_get_user_tree_score(user_id: int) -> str:
         struct_dir.mkdir(parents=True, exist_ok=True)
 
     async with aiohttp.ClientSession() as session:
-        async with session.get(f"https://192.168.0.15/DailyNews/Report/stat/{user_id}", headers=headers,
+        async with session.get(f"https://217.26.1.106/DailyNews/Report/stat/{user_id}", headers=headers,
                                ssl=ssl_context) as response:
             file_path = struct_dir / f"{user_id}.xlsx"
             if response.status == 200:
