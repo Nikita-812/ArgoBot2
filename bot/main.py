@@ -129,7 +129,6 @@ async def handle_working_hours_request(message: Message) -> None:
         await message.answer(text=content)
     except Exception as e:
         logger.error(f"Error getting working hours: {e}")
-        await message.answer(f"Произошла ошибка при получении рабочего времени: {str(e)}")
 
 
 @dp.message(F.text == ButtonText.reg)
@@ -150,6 +149,7 @@ async def handle_enter_account(message: Message, state: FSMContext) -> None:
     await message.answer('Пожалуйста, введите ваш ID.')
 
 
+# Обработчик ввода ID пользователя
 @dp.message(RegStates.id, F.text)
 async def handle_user_search(message: Message, state: FSMContext) -> None:
     """
@@ -165,30 +165,25 @@ async def handle_user_search(message: Message, state: FSMContext) -> None:
         password = generate_password()
         send_email_password(user['email'], password)
         await message.answer("Пароль отправлен на вашу почту. Пожалуйста, введите его.")
-        await state.update_data(id=user)
+        await state.update_data(id=user, password=password, attempts=3) 
         await state.set_state(RegStates.password)
-        await state.update_data(password=password)
     else:
         await message.answer('Не удалось найти пользователя с указанным ID. Попробуйте снова.')
 
 
-@dp.message(RegStates.id)
-async def failure_get_user_id(message: Message) -> None:
-    """
-    Handles incorrect user ID input.
-    """
-    await message.answer('Пожалуйста, введите ваш ID числом.')
-
-
+# Обработчик для проверки пароля
 @dp.message(RegStates.password, F.text)
 async def handle_password_check(message: Message, state: FSMContext) -> None:
     """
-    Checks the password entered by the user.
+    Checks the password entered by the user, with a maximum of 3 attempts.
     """
     try:
-        password = message.text
         user_data = await state.get_data()
-        if password == user_data.get('password'):
+        attempts = user_data.get('attempts', 3)
+        entered_password = message.text
+
+        # Проверяем пароль
+        if entered_password == user_data.get('password'):
             user_data['id']['api_id'] = message.from_user.id
             await bd_reg_participant(user_data['id'])
             await message.answer(
@@ -197,20 +192,34 @@ async def handle_password_check(message: Message, state: FSMContext) -> None:
             )
             await state.clear()
         else:
-            await message.answer("Неверный пароль. Попробуйте еще раз.")
+            attempts -= 1
+            if attempts > 0:
+                await state.update_data(attempts=attempts)
+                await message.answer(f"Неверный пароль. Осталось попыток: {attempts}. Попробуйте еще раз.")
+            else:
+                await message.answer("Количество попыток исчерпано. Попробуйте войти позже.")
+                await state.clear()
     except Exception as e:
         logger.error(f"Error during password check: {e}")
         await message.answer('Произошла ошибка. Попробуйте войти позже.')
 
 
+# Обработчик для некорректного ввода ID
+@dp.message(RegStates.id)
+async def failure_get_user_id(message: Message) -> None:
+    """
+    Handles incorrect user ID input.
+    """
+    await message.answer('Пожалуйста, введите ваш ID числом.')
+
+
+# Обработчик для некорректного ввода пароля
 @dp.message(RegStates.password)
 async def failure_password_check(message: Message) -> None:
     """
     Handles incorrect password input.
     """
     await message.answer('Введите ваш пароль текстом.')
-
-
 @dp.message(F.text == ButtonText.get_bonus_score)
 async def handle_bonus_score_request(message: Message) -> None:
     """
