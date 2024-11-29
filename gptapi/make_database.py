@@ -8,9 +8,17 @@ import openai
 from chromadb.config import Settings
 import chromadb
 from typing import List, Tuple
+import unicodedata
+from nltk.tokenize import sent_tokenize, word_tokenize
 import os
 from dotenv import load_dotenv
 import json
+import unicodedata
+import spacy
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+from nltk.stem import WordNetLemmatizer
+import nltk
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -27,17 +35,117 @@ text_columns = [
 # Папка с данными
 data_folder = './rag_data/'  # Замените на путь к вашей папке с данными
 
+nltk.download('punkt')
+nltk.download('wordnet')
+nltk.download('stopwords')
+
+# Загрузка модели Spacy
+nlp = spacy.load("ru_core_news_md") 
+
 def clean_text(text: str) -> str:
     """
-    Очищает текст от HTML тегов и ненужных символов, сохраняя URL-адреса.
+    Полностью подготавливает текст для использования в RAG системе.
+    Включает очистку от HTML-тегов, нормализацию, удаление стоп-слов, извлечение сущностей, лемматизацию и другие преобразования.
     """
     if not isinstance(text, str):
         return ''
-    # Удаление HTML тегов
+
+    # Удаление HTML-тегов
     text = re.sub(r'<[^>]+>', '', text)
-    # Удаление ненужных символов, кроме используемых в URL
-    text = re.sub(r'[^\w\s:/\.-]', '', text)
-    return text.strip()
+
+    # Декодирование HTML сущностей
+    try:
+        import html
+        text = html.unescape(text)
+    except ImportError:
+        pass
+
+    # Приведение текста к Unicode NFC для стандартизации
+    text = unicodedata.normalize('NFC', text)
+
+    # Удаление избыточных пробелов
+    text = re.sub(r'\s+', ' ', text)
+
+    # Приведение к нижнему регистру
+    text = text.lower().strip()
+
+    # Удаление всех символов, кроме букв, цифр и базовой пунктуации
+    text = re.sub(r'[^\w\s.,!?\'"]+', '', text)
+
+    # Токенизация
+    tokens = word_tokenize(text)
+
+    # Удаление стоп-слов
+    stop_words = set(stopwords.words('russian'))
+    tokens = [word for word in tokens if word not in stop_words]
+
+    # Лемматизация с использованием NLTK
+    lemmatizer = WordNetLemmatizer()
+    tokens = [lemmatizer.lemmatize(word) for word in tokens]
+
+    # Сборка текста обратно
+    text = ' '.join(tokens)
+
+    # Обработка текста с помощью Spacy
+    doc = nlp(text)
+
+    # Извлечение важных сущностей (например, DRUG, ORG, MONEY)
+    important_entities = {ent.text: ent.label_ for ent in doc.ents if ent.label_ in {"DRUG", "ORG", "MONEY"}}
+
+    # Дополнение текста извлеченными сущностями
+    entity_text = ' '.join(important_entities.keys())
+    text = f"{text} {entity_text}"
+
+    return text
+
+def create_chunks_nltk(text: str, max_tokens: int = 200, overlap: int = 0) -> List[str]:
+    """
+    Разбивает текст на чанки заданного размера с использованием NLTK.
+
+    Args:
+        text (str): Исходный текст для разбиения.
+        max_tokens (int): Максимальное количество токенов в одном чанке.
+        overlap (int): Количество перекрывающихся токенов между чанками.
+
+    Returns:
+        List[str]: Список чанков текста.
+    """
+    # Токенизация текста на предложения
+    sentences = sent_tokenize(text)
+
+    # Формируем чанки
+    chunks = []
+    current_chunk = []
+    current_token_count = 0
+
+    for sentence in sentences:
+        # Токенизация предложения на слова
+        sentence_tokens = word_tokenize(sentence)
+        token_count = len(sentence_tokens)
+
+        # Проверяем, поместится ли предложение в текущий чанк
+        if current_token_count + token_count <= max_tokens:
+            current_chunk.append(sentence)
+            current_token_count += token_count
+        else:
+            # Завершаем текущий чанк и создаём новый
+            chunks.append(" ".join(current_chunk))
+            
+            # Добавляем предложение в новый чанк, учитывая overlap
+            if overlap > 0:
+                overlap_tokens = current_chunk[-overlap:] if current_chunk else []
+                current_chunk = overlap_tokens + [sentence]
+            else:
+                current_chunk = [sentence]
+            
+            current_token_count = token_count
+
+    # Добавляем последний чанк
+    if current_chunk:
+        chunks.append(" ".join(current_chunk))
+
+    return chunks
+
 async def load_and_preprocess_csv(csv_file: str) -> Tuple[List[str], List[dict]]:
     """
     Асинхронная загрузка и предобработка данных из CSV файла.
@@ -93,6 +201,40 @@ async def load_and_preprocess_json(json_file: str) -> Tuple[List[str], List[dict
             'answer': answer
         })
     return texts, metadatas
+
+
+async def load_and_preprocess_txt(txt_file: str, max_tokens: int = 50, overlap: int = 20) -> Tuple[List[str], List[dict]]:
+    """
+    Асинхронная загрузка текста из файла, разбиение на чанки и создание метаданных.
+
+    Args:
+        txt_file (str): Путь к текстовому файлу.
+        max_tokens (int): Максимальное количество токенов в одном чанке.
+        overlap (int): Количество перекрывающихся предложений между чанками.
+
+    Returns:
+        Tuple[List[str], List[dict]]: Список чанков текста и метаданные.
+    """
+    # Асинхронное чтение текста из файла
+    async with aiofiles.open(txt_file, mode='r', encoding='utf-8') as f:
+        content = await f.read()
+    
+    print("txt file open")
+    # Разделение текста на чанки
+    chunks = create_chunks_nltk(content, max_tokens=max_tokens, overlap=overlap)
+    print('chunks cretaed')
+    # Создание метаданных
+    metadatas = [
+        {
+            'chunk_index': idx,
+            'chunk_text': chunk,
+            'start_token': sum(len(word_tokenize(chunks[i])) for i in range(idx)),
+            'end_token': sum(len(word_tokenize(chunks[i])) for i in range(idx + 1))
+        }
+        for idx, chunk in enumerate(chunks)
+    ]
+    print('meatadatas created')
+    return chunks, metadatas
 
 async def generate_embeddings(texts: List[str]) -> List[List[float]]:
     """
@@ -152,16 +294,20 @@ async def process_files_in_folder(folder: str) -> Tuple[List[str], List[dict]]:
                 json_texts, json_metadatas = await load_and_preprocess_json(file_path)
                 texts.extend(json_texts)
                 metadatas.extend(json_metadatas)
+            elif file.endswith(".txt"):
+                text_texts, text_metadatas = await  load_and_preprocess_txt(file_path)
+                texts.extend(text_texts)
+                metadatas.extend(text_metadatas)
 
     return texts, metadatas
 
 async def main():
     # Загрузка и предобработка всех данных из папки
     texts, metadatas = await process_files_in_folder(data_folder)
-
+    print("все файлы обработаны")
     # Генерация эмбеддингов для всех текстов
     embeddings = await generate_embeddings(texts)
-
+    print("запрос к openAI прошел")
     # Подключение к асинхронному клиенту ChromaDB
     client = await chromadb.AsyncHttpClient(host='localhost', port = 8000)
 

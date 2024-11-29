@@ -6,6 +6,7 @@ from chromadb.config import Settings
 from typing import List
 import os
 from dotenv import load_dotenv
+from make_database import clean_text
 
 load_dotenv()
 
@@ -91,7 +92,7 @@ async def query_database(query_text: str) -> List[str]:
 
 async def main():
     # Ввод запроса пользователя
-    query_text = input("Введите ваш вопрос: ")
+    query_text =str(clean_text(input("Введите ваш вопрос: ")))
     responses = await query_database(query_text)
     print("\nОтветы:")
     for response in responses:
@@ -100,4 +101,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-

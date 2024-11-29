@@ -18,6 +18,7 @@ from bot.constructor_kb import (create_background_info_keyboard,
                                 create_start_keyboard)
 from db.db import bd_get_user_by_id, bd_get_user_by_tg_id, bd_reg_participant
 from gptapi.gpt import generate_response
+from gptapi.make_database import clean_text
 from internet_parsers.delivery_parse import get_sale_point_from_csv
 from internet_parsers.parse_delivery_conditions import get_delivery_conditions_from_txt
 from internet_parsers.parse_operators_contact import get_operators_contacts_from_txt
@@ -365,9 +366,9 @@ async def gpt_ans(message: Message) -> None:
     """
     Handles all other text messages and generates a response using GPT.
     """
-    prompt = message.text
+    prompt = clean_text(str(message.text))
     await bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
-    response = await generate_response(str(prompt))
+    response = await generate_response(prompt)
     await message.answer(response, parse_mode=ParseMode.MARKDOWN)
     await get_report_from_user(message, response)
 # Main function
